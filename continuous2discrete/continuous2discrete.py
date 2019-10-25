@@ -6,7 +6,7 @@ University of Freiburg
 
 Authors:
   Lukas Elflein <elfleinl@cs.uni-freiburg.de>
-  Johannes Hörmann <johannes.hoermann@imtek-uni-freiburg.de>
+  Johannes Hoermann <johannes.hoermann@imtek-uni-freiburg.de>
 """
 import logging
 import os.path
@@ -36,7 +36,7 @@ def pdf_to_cdf(pdf):
   """Transform partial distribution to cumulative distribution function
 
   >>> pdf_to_cdf(pdf=np.array([0.5, 0.3, 0.2]))
-  array([0.5, 0.8, 1. ])
+  array([ 0.5,  0.8,  1. ])
   """
   cdf = np.cumsum(pdf)
   cdf /= cdf[-1]
@@ -49,7 +49,7 @@ def get_centers(bins):
 
   Example:
   >>> get_centers(bins=np.array([0.0, 1.0, 2.0]))
-  array([0.5, 1.5])
+  array([ 0.5,  1.5])
   """
   bins = bins.astype(float)
   return (bins[:-1] + bins[1:]) / 2
