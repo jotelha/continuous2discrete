@@ -11,7 +11,6 @@ import decimal
 
 np.random.seed(74)
 
-
 def debye(rho_bulk, charge, permittivity=79, temperature=298.15):
 	"""Calculate the Debye length.
 	The Dybe length indicates at which distance a charge will be screened off.
