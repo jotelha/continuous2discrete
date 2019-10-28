@@ -8,22 +8,23 @@ Authors:
   Johannes Hoermann <johannes.hoermann@imtek-uni-freiburg.de>
 """
 import logging
-
+import itertools as it
 import numpy as np
 import scipy.constants as sc
 import matplotlib.pyplot as plt
 
 logger = logging.getLogger(__name__)
-# Drücke nicht-linearen Teil der Transportgleichung (genauer, des Flusses) über
+
+# Druecke nicht-linearen Teil der Transportgleichung (genauer, des Flusses) ueber
 # Bernoulli-Funktionen
 #
 # $$ B(x) = \frac{x}{\exp(x)-1} $$
 #
-# aus. Damit wir in der Nähe von 0 nicht "in die Bredouille geraten", verwenden
+# aus. Damit wir in der Naehe von 0 nicht "in die Bredouille geraten", verwenden
 # wir hier lieber die Taylorentwicklung. In der Literatur (Selbherr, S. Analysis
 # and Simulation of Semiconductor Devices, Spriger 1984) wird eine noch
-# aufwendigere stückweise Definition empfohlen, allerdings werden wir im
-# Folgenden sehen, dass unser Ansatz für dieses stationäre Problem genügt.
+# aufwendigere stueckweise Definition empfohlen, allerdings werden wir im
+# Folgenden sehen, dass unser Ansatz fuer dieses stationaere Problem genuegt.
 def B(x):
     return np.where( np.abs(x) < 1e-9,
         1 - x/2 + x**2/12 - x**4/720, # Taylor
@@ -96,18 +97,21 @@ def jacobian(f, x0, dx=np.NaN):
 
 class PoissonNernstPlanckSystem:
 
+  # solver settings
+  N      = 1000 # discretization segments
   e      = 1e-10 # Newton solver default tolerance
   maxit  = 200 # Newton solver maximum iterations
-  output = False
-  outfreq = 1
+
+  # output settings
+  output = False   # let Newton solver output convergence plots...
+  outfreq = 1      # ...at every nth iteration
+  label_width = 40 # charcater width of quantity labels in log
 
   def newton(self,f,xij):
     # xij, e=1e-10, maxit=200, output=False, outfreq=1
-    #N = len(xij)
-    Ni = self.Ni
-    N = Ni -1
+    self.xij = []
 
-    self.logger.debug('Newton solver, grid points N = {:d}'.format(N))
+    self.logger.debug('Newton solver, grid points N = {:d}'.format(self.N))
     self.logger.debug('Newton solver, tolerance e = {:> 8.4g}'.format(self.e))
     self.logger.debug('Newton solver, maximum number of iterations M = {:d}'.format(self.maxit))
 
@@ -142,18 +146,18 @@ class PoissonNernstPlanckSystem:
     self.convergenceStepRelative = np.zeros(self.maxit)
     self.convergenceResidualAbsolute = np.zeros(self.maxit)
 
-    dxij = np.zeros(N)
+    dxij = np.zeros(self.N)
     while delta_rel > self.e and i < self.maxit:
         self.logger.info('*** Newton solver iteration {:d} ***'.format(i))
         J = jacobian(f, xij)
         rank = np.linalg.matrix_rank(J)
         self.logger.debug('    Jacobian rank {:d}'.format(rank))
 
-        if rank < N:
+        if rank < self.N:
             if self.output:
                 self.logger.warn("Singular jacobian of rank"
                       + "{:d} < {:d} at step {:d}".format(
-                      rank, N, i ))
+                      rank, self.N, i ))
             break
 
         F = f(xij)
@@ -165,6 +169,7 @@ class PoissonNernstPlanckSystem:
         delta_rel = delta / np.linalg.norm(xij)
 
         xij -= dxij
+        self.xij.append(xij)
 
         normF = np.linalg.norm(F)
 
@@ -179,14 +184,19 @@ class PoissonNernstPlanckSystem:
         if i % self.outfreq == 0 and self.output:
             self.logger.info("Step {:4d}: norm(dx)/norm(x) = {:4.2e}, norm(dx) = {:4.2e}, norm(F) = {:4.2e}".format(
                 i, delta_rel, delta, normF) )
-            duij = dxij[:Ni]
-            dnij = dxij[Ni:]
-            uij = xij[:Ni]
-            nij = xij[Ni:]
-            ax1.plot(self.X, uij, '-', label='u Step {:2d}'.format(i))
-            ax2.plot(self.X, nij, '-', label='n Step {:2d}'.format(i))
-            ax3.plot(self.X, duij, '-', label='du Step {:2d}'.format(i))
-            ax4.plot(self.X, dnij, '-', label='dn Step {:2d}'.format(i))
+            duij = dxij[:self.Ni]
+            dnij = dxij[self.Ni:].reshape(self.M,self.Ni)
+
+            uij = xij[:self.Ni]
+            nij = xij[self.Ni:].reshape(self.M,self.Ni)
+
+            ax1.plot(self.X, uij, '-', label='u step {:02d}'.format(i))
+            for k in range(self.M):
+              ax2.plot(self.X, nij[k,:], '-', label='n step {:02d}, species {:02d}'.format(i,k))
+            ax3.plot(self.X, duij, '-', label='du step {:02d}'.format(i))
+            for k in range(self.M):
+              ax4.plot(self.X, dnij[k,:], '-', label='dn step {:02d}, species {:02d}'.format(i,k))
+
             ax1.legend(loc='best')
             ax2.legend(loc='best')
             ax3.legend(loc='best')
@@ -222,18 +232,18 @@ class PoissonNernstPlanckSystem:
     # convergenceStepAbsolute[:i], convergenceStepRelative[:i], convergenceResidualAbsolute[:i]
     return xij
 
-  def solve(self, N = 1000):
+  def init(self):
     # indices
-    self.Ni = N+1
-    I = np.arange(N+1)
+    self.Ni = self.N+1
+    I = np.arange(self.Ni)
 
-    self.logger.info('discretization segments N:    {:> 8d}'.format(N))
-    self.logger.info('grid points Ni:               {:> 8d}'.format(self.Ni))
-    #N      = 1000 # 1000 segments, 1001 points
+    self.logger.info('{:<{lwidth}s} {:> 8.4g}'.format(
+      'discretization segments N', self.N, lwidth=self.label_width))
+    self.logger.info('{:<{lwidth}s} {:> 8.4g}'.format(
+      'grid points N', self.Ni, lwidth=self.label_width))
 
     # discretization
-    dx      = self.L_scaled / N # spatial step
-    self.dx = dx
+    self.dx      = self.L_scaled / self.N # spatial step
     # maximum time step allowed
     # (irrelevant for our steady state case)
     # D * dt / dx^2 <= 1/2
@@ -242,97 +252,199 @@ class PoissonNernstPlanckSystem:
     # dt_max = dx**2 / (2*self.Dn_scaled)
 
     # dx2overtau = dx**2 / self.tau_scaled
-    dx2overtau = 10.0
-    self.dx2overtau = dx2overtau
+    self.dx2overtau = 10.0
 
     self.logger.info('dx:                           {:> 8.4g}'.format(self.dx))
     self.logger.info('dx2overtau:                   {:> 8.4g}'.format(self.dx2overtau))
 
     # positions (scaled)
-    X = I*dx
-    self.X = X
+    self.X = I*self.dx
 
     # Bounary & initial values
-
-    # Potential Dirichlet BC
-    self.u0 = 0
-    self.u1 = self.delta_u_scaled
-    self.logger.info('Left hand side Dirichlet boundary condition:  u0 = {:> 8.4g}'.format(self.u0))
-    self.logger.info('Right hand side Dirichlet boundary condition: u1 = {:> 8.4g}'.format(self.u1))
 
     # internally:
     #   n: dimensionless concentrations
     #   u: dimensionless potential
     #   i: spatial index
     #   j: temporal index
+    #   k: species index
     # initial concentrations equal to bulk concentrations
-    ni0 = np.ones(I.shape)*self.c_scaled
+
+    # Kronecker product, M rows (ion species), Ni cols (grid points),
+    self.ni0 = np.kron( self.c_scaled, np.ones((self.Ni,1)) ).T
+    self.zi0 = np.kron( self.z, np.ones((self.Ni,1)) ).T # does not change
+    zini0 = self.zi0*self.ni0 # z*n
+
+    #rhoi0 = np.zeros( self.Ni ) # initial charge distribution (dimensionless)
+    #for k in range(0,self.M):
+    #  rhoi0 += zini0[(k*self.Ni):((k+1)*self.Ni)]
+    # shape: ion species (rows), grid points (cols), sum over ion species (along rows)
+    rhoi0 = zini0.sum(axis=0)
 
     # system matrix of spatial poisson equation
     Au = np.zeros((self.Ni,self.Ni))
     bu = np.zeros(self.Ni)
     Au[0,0]   = 1
     Au[-1,-1] = 1
+    for i in range(1,self.N):
+        Au[i,[i-1,i,i+1]] = [1.0, -2.0, 1.0] # 1D Laplace operator, 2nd order
+
+    bu = rhoi0*self.dx**2 # => Poisson equation
     bu[0]  = self.u0
     bu[-1] = self.u1
 
     # get initial potential distribution by solving Poisson equation
-    for i in range(1,N):
-        Au[i,[i-1,i,i+1]] = [1.0, -2.0, 1.0] # 1D Laplace operator, 2nd order
-        bu[i] = ni0[i]*dx**2 # ni0 == Ni => Poisson equation
+    self.ui0 = np.dot( np.linalg.inv(Au), bu) # A u - b = 0 <=> u = A^-1 b
 
-    ui0 = np.dot( np.linalg.inv(Au), bu) # A u - b = 0 <=> u = A^-1 b
-
-    xi0 = np.concatenate([ui0,ni0])
-
+  def solve(self):
+    xi0 = np.concatenate([self.ui0, self.ni0.flatten()])
     xij = self.newton(self.G,xi0.copy())
-
     self.uij = xij[:self.Ni]
-    self.nij = xij[self.Ni:]
-
+    self.nij = xij[self.Ni:].reshape(self.M, self.Ni)
     return xij
+
+  def useStandardInterfaceBC(self):
+    # Potential Dirichlet BC
+    self.u0 = self.delta_u_scaled
+    self.u1 = 0
+    self.logger.info('Left hand side Dirichlet boundary condition:  u0 = {:> 8.4g}'.format(self.u0))
+    self.logger.info('Right hand side Dirichlet boundary condition: u1 = {:> 8.4g}'.format(self.u1))
+
+    # set up boundary conditions
+    self.leftPotentialBC = lambda u: self.leftDirichletBC(u,self.u0)
+    self.rightPotentialBC = lambda u: self.rightDirichletBC(u,self.u1)
+
+    self.leftConcentrationBC = []
+    self.rightConcentrationBC = []
+    for k in range(self.M):
+      self.leftConcentrationBC.append( lambda n: self.leftNeumannBC(n,0) )
+      self.rightConcentrationBC.append(
+        lambda n: self.rightDirichletBC(n,self.c_scaled[k]) )
+
+  def useStandardDirichletBC(self):
+    self.u0 = - self.delta_u_scaled/2.0
+    self.u1 = + self.delta_u_scaled/2.0
+    self.logger.info('Left hand side Dirichlet boundary condition:  u0 = {:> 8.4g}'.format(self.u0))
+    self.logger.info('Right hand side Dirichlet boundary condition: u1 = {:> 8.4g}'.format(self.u1))
+
+    # set up boundary conditions
+    self.leftPotentialBC = lambda u: self.leftDirichletBC(u,self.u0)
+    self.rightPotentialBC = lambda u: self.rightDirichletBC(u,self.u1)
+
+    self.leftConcentrationBC = []
+    self.rightConcentrationBC = []
+    for k in range(self.M):
+      self.leftConcentrationBC.append(
+        lambda n: self.leftDirichletBC(n,self.c_scaled[k]) )
+      self.rightConcentrationBC.append(
+        lambda n: self.rightDirichletBC(n,self.c_scaled[k]) )
+
+
+  def leftDirichletBC(self,x,x0):
+    """Construct Dirichlet BC at left boundary"""
+    return x[0] - x0
+
+  def rightDirichletBC(self,x,x0):
+    return x[-1] - x0
+
+  def leftNeumannBC(self,x,j0):
+    """Construct finite difference Neumann BC (flux BC) at left boundray"""
+    # right hand side first derivative of second order error
+    # df0dx = 1 / (2*dx) * (-3 f0 + 4 f1 - f2 ) + O(dx^2) = j0
+    bcval = -3.0*x[0] + 4.0*x[1] - x[2] - 2.0*self.dx*j0
+    self.logger.debug(
+      'Neumann BC F[0]  = -3*x[0]  + 4*x[1]  - x[2]  = {:> 8.4g}'.format(bcval))
+    return bcval
+
+  def rightNeumannBC(self,x,j0):
+    """Construct finite difference Neumann BC (flux BC) at right boundray"""
+    # left hand side first derivative of second order error
+    # dfndx = 1 / (2*dx) * (+3 fn - 4 fn-1 + fn-2 ) + O(dx^2) = 0
+    bcval = 3.0*x[-1] - 4.0*x[-2] + x[-3] - 2.0*self.dx*j0
+    self.logger.debug(
+      'Neumann BC F[-1] = -3*x[-1] + 4*x[-2] - nijk[-3] = {:> 8.4g}'.format(bcval))
+    return bcval
 
   # the non-linear system, "controlled volume"
   def G(self, x):
     # global NDi, Ni, u0, u1
 
     uij1 = x[:self.Ni]
+    self.logger.debug('potential range [u_min, u_max] = [ {:>.4g}, {:>.4g} ]'.format(np.min(uij1),np.max(uij1)))
+
     nij1 = x[self.Ni:]
 
-    Fu = ( np.roll(uij1, -1) - 2*uij1 + np.roll(uij1, 1) ) - nij1*self.dx**2
+    nijk1 = nij1.reshape( self.M, self.Ni )
+    for k in range(self.M):
+      self.logger.debug(
+        'ion species {:02d} concentration range [c_min, c_max] = [ {:>.4g}, {:>.4g} ]'.format(
+          k,np.min(nijk1[k,:]),np.max(nijk1[k,:]) ) )
 
-    Fn =    + B(np.roll(uij1, 1) - uij1)  * np.roll(nij1, 1) \
-            - B(uij1 - np.roll(uij1, 1))  * nij1 \
-            + B(np.roll(uij1, -1) - uij1) * np.roll(nij1, -1) \
-            - B(uij1 - np.roll(uij1, -1)) * nij1 \
-            - nij1 * self.dx2overtau
+    # M rows (ion species), N_i cols (grid points)
+    zi0nijk1 = self.zi0*nijk1 # z_ik*n_ijk
+    for k in range(self.M):
+      self.logger.debug(
+        'ion species {:02d} charge range [z*c_min, z*c_max] = [ {:>.4g}, {:>.4g} ]'.format(
+          k,np.min(zi0nijk1[k,:]),np.max(zi0nijk1[k,:]) ) )
 
-    # Dirichlet BC:
-    Fu[0]  = uij1[0] - self.u0
-    Fu[-1] = uij1[-1] - self.u1
+    # charge density sum_k=1^M (z_ik*n_ijk)
+    rhoij1 = zi0nijk1.sum(axis=0)
+    self.logger.debug(
+      'charge density range [rho_min, rho_max] = [ {:>.4g}, {:>.4g} ]'.format(
+        np.min(rhoij1),np.max(rhoij1) ) )
 
-    self.logger.debug('Dirichlet BC  Fu[0] = uij[0]  - u0 = {:> 8.4g}'.format(Fu[0]))
-    self.logger.debug('Dirichlet BC Fu[-1] = uij[-1] - u1 = {:> 8.4g}'.format(Fu[-1]))
+    # reduced Poisson equation: d2udx2 = rho
+    Fu = ( np.roll(uij1, -1) - 2*uij1 + np.roll(uij1, 1) ) - 0.5*rhoij1*self.dx**2
+    # TODO: double-check factor 0.5 here
 
-    # implement flux BC (Neumann BC) here
-    #
-    # right-hand side first derivative of second order error
-    # df0dx = 1 / (2*dx) * (-3 f0 + 4 f1 - f2 ) + O(dx^2) = 0
-    # f0 = (4 f1 - f2) / 3
-    # right-hand side first derivative of second order error
-    # dfndx = 1 / (2*dx) * (+3 fn - 4 fn-1 + fn-2 ) + O(dx^2) = 0
-    #
-    # Fn[0]  = nij1[0] - self.NDi[0]
-    Fn[0] = -3.0*nij1[0] + 4.0*nij1[1] - nij1[2]
-    Fn[int(self.Ni/2)] = nij1[int(self.Ni/2)] - self.c_scaled # BC
-    Fn[-1] = 3.0*nij1[-1] - 4.0*nij1[-2] + nij1[-3]
+    # potential boundary conditions:
+    # Fu[0]  = uij1[0] - self.u0
+    # Fu[-1] = uij1[-1] - self.u1
+    Fu[0] =  self.leftPotentialBC(uij1)
+    Fu[-1] = self.rightPotentialBC(uij1)
 
-    self.logger.debug('Neumann BC Fn[0]  = -3*nij[0]  + 4*nij[1]  - nij[2]  = {:> 8.4g}'.format(Fn[0]))
-    # self.logger.debug('Neumann BC Fn[-1] = -3*nij[-1] + 4*nij[-2] - nij[-3] = {:> 8.4g}'.format(Fn[-1]))
-    self.logger.debug('Dirichlet BC Fn[-1] = nij[-1] - n1 = {:> 8.4g}'.format(Fn[-1]))
-    # self.logger.debug('Dirichlet BC Fn[-1] = -3*nij[-1] + 4*nij[-2] - nij[-3] = {:> 8.4g}'.format(Fn[-1]))
+    self.logger.debug('Potential BC residual Fu[0]  = {:> 8.4g}'.format(Fu[0]))
+    self.logger.debug('Potential BC residual Fu[-1] = {:> 8.4g}'.format(Fu[-1]))
 
-    return np.concatenate([Fu,Fn])
+    Fn = np.zeros([self.M, self.Ni])
+    # loop over k = 1..M reduced Nernst-Planck equations:
+    # - d2nkdx2 - ddx (zk nk dudx ) = 0
+    for k in range(self.M):
+      Fn[k,:] = + B(np.roll(uij1, 1) - uij1)  * np.roll(nijk1[k,:], 1) \
+                - B(uij1 - np.roll(uij1, 1))  * zi0nijk1[k,:] \
+                + B(np.roll(uij1, -1) - uij1) * np.roll(nijk1[k,:], -1) \
+                - B(uij1 - np.roll(uij1, -1)) * zi0nijk1[k,:]
+
+      Fn[k,0] =  self.leftConcentrationBC[k](nijk1[k,:])
+      Fn[k,-1] = self.rightConcentrationBC[k](nijk1[k,:])
+
+      self.logger.debug(
+        'ion species {k:02d} concentration BC Fn[{k:d},0]  = {:> 8.4g}'.format(
+          Fn[k,0],k=k))
+      self.logger.debug(
+        'ion species {k:02d} concentration BC Fn[{k:d},-1]  = {:> 8.4g}'.format(
+          Fn[k,-1],k=k))
+      # implement flux BC (Neumann BC) here
+      #
+      # right-hand side first derivative of second order error
+      # df0dx = 1 / (2*dx) * (-3 f0 + 4 f1 - f2 ) + O(dx^2) = 0
+      # f0 = (4 f1 - f2) / 3
+      # right-hand side first derivative of second order error
+      # dfndx = 1 / (2*dx) * (+3 fn - 4 fn-1 + fn-2 ) + O(dx^2) = 0
+      #
+      # Fn[k,0] = -3.0*nijk1[k,0] + 4.0*nijk1[k,1] - nijk1[k,2]
+      # Fn[k,-1] = 3.0*nijk1[k,-1] - 4.0*nijk1[k,-2] + nijk1[k,-3]
+      #Fn[int(self.Ni/2)] = nij1[int(self.Ni/2)] - self.c_scaled # BC
+      # Fn[k,-1] = nij1[-1] - self.c_scaled # BC
+
+      #self.logger.debug(
+      #  'Neumann BC Fn[{k:d},0]  = -3*nijk[{k:d},0]  + 4*nijk[{k:d},1]  - nijk[{k:d},2]  = {:> 8.4g}'.format(Fn[k,0],k=k))
+      #self.logger.debug(
+      #  'Neumann BC Fn[{k:d},-1] = -3*nijk[{k:d},-1] + 4*nijk[{k:d},-2] - nijk[{k:d},-3] = {:> 8.4g}'.format(Fn[k,-1],k=k))
+      # self.logger.debug('Dirichlet BC Fn[-1] = nij[-1] - n1 = {:> 8.4g}'.format(Fn[-1]))
+      # self.logger.debug('Dirichlet BC Fn[-1] = -3*nij[-1] + 4*nij[-2] - nij[-3] = {:> 8.4g}'.format(Fn[-1]))
+
+    return np.concatenate([Fu,Fn.flatten()])
 
   def I(self): # ionic strength
     return 0.5*np.sum( np.square(self.z) * self.c )
@@ -344,11 +456,11 @@ class PoissonNernstPlanckSystem:
 
   # default 0.1 mM NaCl aqueous solution
   def __init__(self,
-    c = 0.1,
-    z = 1,
+    c = np.array([0.1,0.1]),
+    z = np.array([1,-1]),
     L = 100e-9, # 100 nm
     T = 298.15,
-    delta_u = 1, # potential difference [V]
+    delta_u = 0.05, # potential difference [V]
     relative_permittivity = 79,
     vacuum_permittivity   = sc.epsilon_0,
     R = sc.value('molar gas constant'),
@@ -356,6 +468,8 @@ class PoissonNernstPlanckSystem:
 
     self.logger = logging.getLogger(__name__)
 
+    assert len(c) == len(z), "Provide concentration AND charge for ALL ion species!"
+    self.M = len(c) # number of ion species
 
     self.c  = c # concentrations
     self.z  = z # number charges
@@ -372,16 +486,28 @@ class PoissonNernstPlanckSystem:
 
     self.f                     = F / (R*T) # for convenience
 
-    self.logger.info('bulk concentration c:         {:> 8.4g}'.format(self.c))
-    self.logger.info('charge number z:              {:> 8.4g}'.format(self.z))
-    self.logger.info('temperature T:                {:> 8.4g}'.format(self.T))
-    self.logger.info('domain size L:                {:> 8.4g}'.format(self.L))
-    self.logger.info('potential difference delta_u: {:> 8.4g}'.format(self.delta_u))
-    self.logger.info('relative permittivity eps_R:  {:> 8.4g}'.format(self.relative_permittivity))
-    self.logger.info('vacuum permittivity eps_0:    {:> 8.4g}'.format(self.vacuum_permittivity))
-    self.logger.info('universal gas constant R:     {:> 8.4g}'.format(self.R))
-    self.logger.info('Faraday constant F:           {:> 8.4g}'.format(self.F))
-    self.logger.info('f = F / (RT)                  {:> 8.4g}'.format(self.f))
+    for i, (c, z) in enumerate(zip(self.c,self.z)):
+      self.logger.info('{:<{lwidth}s} {:> 8.4g}'.format(
+        "ion species {:02d} concentration c".format(i), c, lwidth=self.label_width))
+      self.logger.info('{:<{lwidth}s} {:> 8.4g}'.format(
+        "ion species {:02d} number charge z".format(i), z, lwidth=self.label_width))
+
+    self.logger.info('{:<{lwidth}s} {:> 8.4g}'.format(
+      'temperature T', self.T, lwidth=self.label_width))
+    self.logger.info('{:<{lwidth}s} {:> 8.4g}'.format(
+      'domain size L', self.L, lwidth=self.label_width))
+    self.logger.info('{:<{lwidth}s} {:> 8.4g}'.format(
+      'potential difference delta_u', self.delta_u, lwidth=self.label_width))
+    self.logger.info('{:<{lwidth}s} {:> 8.4g}'.format(
+      'relative permittivity eps_R', self.relative_permittivity, lwidth=self.label_width))
+    self.logger.info('{:<{lwidth}s} {:> 8.4g}'.format(
+      'vacuum permittivity eps_0', self.vacuum_permittivity, lwidth=self.label_width))
+    self.logger.info('{:<{lwidth}s} {:> 8.4g}'.format(
+      'universal gas constant R', self.R, lwidth=self.label_width))
+    self.logger.info('{:<{lwidth}s} {:> 8.4g}'.format(
+      'Faraday constant F', self.F, lwidth=self.label_width))
+    self.logger.info('{:<{lwidth}s} {:> 8.4g}'.format(
+      'f = F / (RT)', self.f, lwidth=self.label_width))
 
     # scaled units for dimensionless formulation
 
@@ -398,9 +524,12 @@ class PoissonNernstPlanckSystem:
     # u_unit = kB * T / q
     self.u_unit = self.R * self.T / self.F # thermal voltage
 
-    self.logger.info('spatial unit [l]:             {:> 8.4g}'.format(self.l_unit))
-    self.logger.info('concentration unit [c]:       {:> 8.4g}'.format(self.c_unit))
-    self.logger.info('potential unit [u]:           {:> 8.4g}'.format(self.u_unit))
+    self.logger.info('{:<{lwidth}s} {:> 8.4g}'.format(
+      'spatial unit [l]', self.l_unit, lwidth=self.label_width))
+    self.logger.info('{:<{lwidth}s} {:> 8.4g}'.format(
+      'concentration unit [c]', self.c_unit, lwidth=self.label_width))
+    self.logger.info('{:<{lwidth}s} {:> 8.4g}'.format(
+      'potential unit [u]', self.u_unit, lwidth=self.label_width))
 
     # domain
     self.L_scaled = self.L / self.l_unit
@@ -416,6 +545,11 @@ class PoissonNernstPlanckSystem:
 
     # should be 1
     # Dn_scaled    = Dn * t_unit / l_unit**2
-    self.logger.info('reduced domain size L*:       {:> 8.4g}'.format(self.L_scaled))
-    self.logger.info('reduced concentation c*:      {:> 8.4g}'.format(self.c_scaled))
-    self.logger.info('reduced potential delta_u*:   {:> 8.4g}'.format(self.delta_u_scaled))
+    self.logger.info('{:<{lwidth}s} {:> 8.4g}'.format(
+      'reduced domain size L*', self.L_scaled, lwidth=self.label_width))
+    for i, c_scaled in enumerate(self.c_scaled):
+      self.logger.info('{:<{lwidth}s} {:> 8.4g}'.format(
+        "ion species {:02d} reduced concentration c*".format(i),
+        c_scaled, lwidth=self.label_width))
+    self.logger.info('{:<{lwidth}s} {:> 8.4g}'.format(
+      'reduced potential delta_u*', self.delta_u_scaled, lwidth=self.label_width))
