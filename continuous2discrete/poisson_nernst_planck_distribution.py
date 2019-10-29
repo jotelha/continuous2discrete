@@ -91,7 +91,7 @@ def jacobian(f, x0, dx=np.NaN):
         dxj = np.zeros(N)
         dxj[j] = dx[j]
 
-        F[:,j] =  (f(x0 + dxj) - f(x0)) / dxj[j]
+        F[:,j] =  (f(x0 + dxj) - f(x0 -dxj)) / (2.0*dxj[j])
 
     return F
 
@@ -299,7 +299,7 @@ class PoissonNernstPlanckSystem:
     #for k in range(0,self.M):
     #  rhoi0 += zini0[(k*self.Ni):((k+1)*self.Ni)]
     # shape: ion species (rows), grid points (cols), sum over ion species (along rows)
-    rhoi0 = zini0.sum(axis=0)
+    rhoi0 = 0.5*zini0.sum(axis=0)
 
     # system matrix of spatial poisson equation
     Au = np.zeros((self.Ni,self.Ni))
@@ -396,8 +396,8 @@ class PoissonNernstPlanckSystem:
       self.boundary_conditions.extend(  [
         lambda x, k=k: self.leftFluxBC(x,k),
         lambda x, k=k, N0=N0[k]: self.numberConservationConstraint(x,k,N0) ] )
+        #lambda x, k=k: self.rightFluxBC(x,k) ] )
       #self.rightConcentrationBC.append( lambda x, k=k: self.rightFluxBC(x,k) )
-
 
     # constraints
     # N0 = self.L_scaled*self.c_scaled # total amount of species in cell
@@ -479,17 +479,17 @@ class PoissonNernstPlanckSystem:
     return nijk[-1] - x0
 
   def numberConservationConstraint(self,x,k,N0):
-      """N0: total amount of species, k: ion species"""
-      nijk = x[(k+1)*self.Ni:(k+2)*self.Ni]
+    """N0: total amount of species, k: ion species"""
+    nijk = x[(k+1)*self.Ni:(k+2)*self.Ni]
 
-      # rescale to fit interval
-      N = np.sum(nijk*self.dx) * self.N / self.Ni
-      constraint_val = N - N0
+    # rescale to fit interval
+    N = np.sum(nijk*self.dx) * self.N / self.Ni
+    constraint_val = N - N0
 
-      self.logger.debug(
-        'Number conservation constraint F(x)  = N - N0 = {:.4g} - {:.4g} = {:.4g}'.format(
-          N, N0, constraint_val ) )
-      return constraint_val
+    self.logger.debug(
+      'Number conservation constraint F(x)  = N - N0 = {:.4g} - {:.4g} = {:.4g}'.format(
+        N, N0, constraint_val ) )
+    return constraint_val
 
   # TODO: remove or standardize
   # def leftNeumannBC(self,x,j0):
@@ -574,10 +574,12 @@ class PoissonNernstPlanckSystem:
     # loop over k = 1..M reduced Nernst-Planck equations:
     # - d2nkdx2 - ddx (zk nk dudx ) = 0
     for k in range(self.M):
-      Fn[k,:] = + B(np.roll(uij1, 1) - uij1)  * np.roll(zi0nijk1[k,:], 1) \
-                - B(uij1 - np.roll(uij1, 1))  * (zi0nijk1[k,:]) \
-                + B(np.roll(uij1, -1) - uij1) * np.roll(zi0nijk1[k,:], -1) \
-                - B(uij1 - np.roll(uij1, -1)) * (zi0nijk1[k,:])
+      #Fn[k,:] = + B(np.roll(uij1, 1) - uij1)  * np.roll(zi0nijk1[k,:], 1) \
+      #          - B(uij1 - np.roll(uij1, 1))  * (zi0nijk1[k,:]) \
+      #          + B(np.roll(uij1, -1) - uij1) * np.roll(zi0nijk1[k,:], -1) \
+      #          - B(uij1 - np.roll(uij1, -1)) * (zi0nijk1[k,:])
+      Fn[k,:] =  - B(self.zi0[k,:]*(uij1 - np.roll(uij1,-1)))*np.roll(nijk1[k,:],-1) \
+                 + B(self.zi0[k,:]*(np.roll(uij1,-1) - uij1))*nijk1[k,:]
 
       Fn[k,0]  = self.boundary_conditions[2*k+2](x)
       Fn[k,-1] = self.boundary_conditions[2*k+3](x)
