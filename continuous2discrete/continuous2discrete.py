@@ -192,7 +192,7 @@ def generate_structure(distribution, box=np.array([50, 50, 100]), atom_count=100
   support['z'] = np.linspace(0, box[2], n_gridpoints)
 
   # For every atom, draw random x, y and z coordinates
-  for i in range(atom_count + 1):
+  for i in range(atom_count):
     # Z coordinate is distributed non-uniformely
     z = rejection_sampler(distribution, support['z'])
 

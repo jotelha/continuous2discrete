@@ -1,4 +1,4 @@
-""" Calculate ionic densities consistent with the Poisson-Bolzmann equation.
+""" Calculate ionic densities consistent with the Poisson-Boltzmann equation.
 Copyright 2019 Simulation Lab
 University of Freiburg
 Author: Lukas Elflein <elfleinl@cs.uni-freiburg.de>

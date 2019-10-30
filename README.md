@@ -9,17 +9,17 @@ The lubricant is somewhat solvable in water, thus parts of the film will diffuse
 ![pic](https://i.ibb.co/Yh8DxVM/showpicture.png)
 
 ### Physical solution
-Lubricant molecules are charged, and their distribution is described by the Poisson-Bolzmann equation.
+Lubricant molecules are charged, and their distribution is described by the Poisson-Boltzmann equation.
 
 ### Simulating the structure
 To incorporate these results into our lubricant simulation, we need to sample the correct distribution.
 Then we need to transform these samples into the correct file formats and feed them into a Molecular Dynamics simulation.
 
 ### Content
-* `showcase_poisson_bolzmann.ipynb`: A working example
+* `showcase_poisson_boltzmann.ipynb`: A working example
 * `continuous2discrete`:
   * `continuous2discrete.py`: Sampling and plotting
-  * `poisson_bolzmann_distribution.py`: generate potential and densities
+  * `poisson_boltzmann_distribution.py`: generate potential and densities
 
 ### Usage
 When installed with pip, i.e.

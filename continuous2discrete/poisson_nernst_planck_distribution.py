@@ -429,10 +429,12 @@ class PoissonNernstPlanckSystem:
         lambda x, k=k: self.rightDirichletBC(x,k,self.c_scaled[k]) ] )
 
   # boundary conditions and constraints building blocks:
+  # TODO: prescribe flux in proper controlled volume method manner (?)
   def leftFluxBC(self,x,k,j0=0):
       """j0: flux, k: ion species"""
       uij = x[:self.Ni]
       nijk = x[(k+1)*self.Ni:(k+2)*self.Ni]
+      # 2nd order right hand side finite difference scheme:
       # df0dx = 1 / (2*dx) * (-3 f0 + 4 f1 - f2 ) + O(dx^2)
       # - dndx - z n dudx = j0
       dndx = -3.0*nijk[0] + 4.0*nijk[1] - nijk[2]
@@ -450,6 +452,7 @@ class PoissonNernstPlanckSystem:
       """j0: flux, k: ion species"""
       uij = x[:self.Ni]
       nijk = x[(k+1)*self.Ni:(k+2)*self.Ni]
+      # 2nd order left hand side finite difference scheme:
       # df0dx = 1 / (2*dx) * (-3 f0 + 4 f1 - f2 ) + O(dx^2)
       # - dndx - z n dudx = j0
       dndx = 3.0*nijk[-1] - 4.0*nijk[-2] + nijk[-3]
@@ -557,13 +560,7 @@ class PoissonNernstPlanckSystem:
 
     # reduced Poisson equation: d2udx2 = rho
     Fu = - ( np.roll(uij1, -1) - 2*uij1 + np.roll(uij1, 1) ) - 0.5 * rhoij1*self.dx**2
-    # TODO: double-check factor 0.5 here
 
-    # potential boundary conditions:
-    # Fu[0]  = uij1[0] - self.u0
-    # Fu[-1] = uij1[-1] - self.u1
-    #Fu[0] =  self.leftPotentialBC(x)
-    #Fu[-1] = self.rightPotentialBC(x)
     Fu[0] = self.boundary_conditions[0](x)
     Fu[-1] = self.boundary_conditions[1](x)
 
@@ -571,15 +568,22 @@ class PoissonNernstPlanckSystem:
     self.logger.debug('Potential BC residual Fu[-1] = {:> 8.4g}'.format(Fu[-1]))
 
     Fn = np.zeros([self.M, self.Ni])
+
     # loop over k = 1..M reduced Nernst-Planck equations:
     # - d2nkdx2 - ddx (zk nk dudx ) = 0
     for k in range(self.M):
-      #Fn[k,:] = + B(np.roll(uij1, 1) - uij1)  * np.roll(zi0nijk1[k,:], 1) \
-      #          - B(uij1 - np.roll(uij1, 1))  * (zi0nijk1[k,:]) \
-      #          + B(np.roll(uij1, -1) - uij1) * np.roll(zi0nijk1[k,:], -1) \
-      #          - B(uij1 - np.roll(uij1, -1)) * (zi0nijk1[k,:])
-      Fn[k,:] =  - B(self.zi0[k,:]*(uij1 - np.roll(uij1,-1)))*np.roll(nijk1[k,:],-1) \
-                 + B(self.zi0[k,:]*(np.roll(uij1,-1) - uij1))*nijk1[k,:]
+      # conrolled volume implementation: constant flux across domain
+      Fn[k,:] = (
+        + B(self.zi0[k,:]*(uij1 - np.roll(uij1,-1))) * np.roll(nijk1[k,:],-1)
+        - B(self.zi0[k,:]*(np.roll(uij1,-1) - uij1)) * nijk1[k,:]
+        - B(self.zi0[k,:]*(np.roll(uij1,+1) - uij1)) * nijk1[k,:]
+        + B(self.zi0[k,:]*(uij1 - np.roll(uij1,+1))) * np.roll(nijk1[k,:],+1) )
+
+      # controlled volume implementation: flux j = 0 in every grid point
+      #
+      # Fn[k,:] =  (
+      #   B(self.zi0[k,:]*(uij1 - np.roll(uij1,-1)))*np.roll(nijk1[k,:],-1)
+      #   - B(self.zi0[k,:]*(np.roll(uij1,-1) - uij1))*nijk1[k,:] )
 
       Fn[k,0]  = self.boundary_conditions[2*k+2](x)
       Fn[k,-1] = self.boundary_conditions[2*k+3](x)
@@ -590,27 +594,8 @@ class PoissonNernstPlanckSystem:
       self.logger.debug(
         'ion species {k:02d} BC residual Fn[{k:d},-1]  = {:> 8.4g}'.format(
           Fn[k,-1],k=k))
-      # implement flux BC (Neumann BC) here
-      #
-      # right-hand side first derivative of second order error
-      # df0dx = 1 / (2*dx) * (-3 f0 + 4 f1 - f2 ) + O(dx^2) = 0
-      # f0 = (4 f1 - f2) / 3
-      # right-hand side first derivative of second order error
-      # dfndx = 1 / (2*dx) * (+3 fn - 4 fn-1 + fn-2 ) + O(dx^2) = 0
-      #
-      # Fn[k,0] = -3.0*nijk1[k,0] + 4.0*nijk1[k,1] - nijk1[k,2]
-      # Fn[k,-1] = 3.0*nijk1[k,-1] - 4.0*nijk1[k,-2] + nijk1[k,-3]
-      #Fn[int(self.Ni/2)] = nij1[int(self.Ni/2)] - self.c_scaled # BC
-      # Fn[k,-1] = nij1[-1] - self.c_scaled # BC
 
-      #self.logger.debug(
-      #  'Neumann BC Fn[{k:d},0]  = -3*nijk[{k:d},0]  + 4*nijk[{k:d},1]  - nijk[{k:d},2]  = {:> 8.4g}'.format(Fn[k,0],k=k))
-      #self.logger.debug(
-      #  'Neumann BC Fn[{k:d},-1] = -3*nijk[{k:d},-1] + 4*nijk[{k:d},-2] - nijk[{k:d},-3] = {:> 8.4g}'.format(Fn[k,-1],k=k))
-      # self.logger.debug('Dirichlet BC Fn[-1] = nij[-1] - n1 = {:> 8.4g}'.format(Fn[-1]))
-      # self.logger.debug('Dirichlet BC Fn[-1] = -3*nij[-1] + 4*nij[-2] - nij[-3] = {:> 8.4g}'.format(Fn[-1]))
-
-    # Apply constraints if set:
+    # Apply constraints if set (not implemented properly, do not use):
     if len(self.g) > 0:
       Flam = np.array([g(x) for g in self.g])
       F = np.concatenate([Fu,Fn.flatten(),Flam])
@@ -711,8 +696,6 @@ class PoissonNernstPlanckSystem:
     # no time unit for now, only steady state
     # self.t_unit = self.l_unit**2 / self.Dn # fixes Dn_scaled = 1
 
-    # u = psi * q / kB T
-    # u_unit = kB * T / q
     self.u_unit = self.R * self.T / self.F # thermal voltage
 
     self.logger.info('{:<{lwidth}s} {:> 8.4g}'.format(
@@ -736,6 +719,7 @@ class PoissonNernstPlanckSystem:
 
     # should be 1
     # Dn_scaled    = Dn * t_unit / l_unit**2
+
     self.logger.info('{:<{lwidth}s} {:> 8.4g}'.format(
       'reduced domain size L*', self.L_scaled, lwidth=self.label_width))
     for i, c_scaled in enumerate(self.c_scaled):
