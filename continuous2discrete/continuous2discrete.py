@@ -15,6 +15,7 @@ from six.moves import builtins
 import numpy as np
 import matplotlib.pyplot as plt
 
+logger = logging.getLogger(__name__)
 
 def exponential(x, rate=0.1):
   """Exponential distribution."""
@@ -110,7 +111,8 @@ def quartile_function(distribution, p, support=None):
   Assumption: The distribution to be inverted must have a strictly increasing CDF!
   Also see 'https://en.wikipedia.org/wiki/Quantile_function'.
 
-  Arguments:
+  Parameters
+  ----------
   distribution: a function x -> p; x should be approximatable by a compact support
   p: an output of the distribution function, probablities in (0,1) are preferrable
   """
@@ -149,13 +151,15 @@ def rejection_sampler(distribution, support, max_tries=10000):
   Draw a random sample from our support, and keep it if another random number is
   smaller than our target distribution at the support location.
 
-  Arguments
+  Parameters
+  ----------
   distribution: The target distribution, as a histogram over the support
   support: locations in space where our distribution is defined
   max_tries: how often the sampler should attempt to draw before giving up.
        If the distribution is very sparse, increase this parameter to still get results.
 
   Returns
+  -------
   sample: a location which is conistent (in expectation) with being drawn from the distribution.
   """
 
@@ -169,38 +173,85 @@ def rejection_sampler(distribution, support, max_tries=10000):
   raise RuntimeError('Maximum of attempts max_tries {} exceeded!'.format(max_tries))
 
 
-def generate_structure(distribution, box=np.array([50, 50, 100]), atom_count=100, n_gridpoints=100):
+def generate_structure(
+  distribution=None, box=np.array([50, 50, 100]),
+  atom_count=100, n_gridpoints=100,
+  distribution_x=uniform, distribution_y=uniform, distribution_z=uniform):
   """Generate an atomic structure.
 
-  Z coordinates are distributed according to the given distribution.
-  To construct the positions, we insert an atom with probality distribution(z) at place z.
-  This sampling is done by inverting the distribution, and sampling uniformely from distri^-1.
+  Coordinates are distributed according to given distributions.
+  To construct the positions, we insert an atom with probality
+  distribution(z) at place z. This sampling is done by inverting
+  the distribution, and sampling uniformely from distri^-1.
 
-  X and Y coordinates are drawn uniformely.
+  Per default, X and Y coordinates are drawn uniformely.
 
-  Arguments:
+  Parameters
+  ----------
+  distribution_x: func(x), optional
+      distribution for sampling in x direction (default: uniform)
+  distribution_y: func(x), optional (default: uniform)
+  distribution_z: func(x), optional (default: uniform)
+  distribution: func(x), optional (default: None)
+      If none of the above is explicitly specified, but 'distribution' is, then
+      uniform sampling appplies along x and y axes, while applying
+      'distribution' along z axis.
+  box: np.ndarray(3), optional (default: np.array([50, 50, 100]) )
+      dimensions of volume to be filled with samples
 
+  atom_count: int, optional (default: 100)
+      number of samples to draw
+  n_gridpoints: int or (int,int,int), optional (default: 100)
+      samples are not placed arbitrarily, but on a evenly spaced grid of this
+      many grid points along each axis. Specify
+
+  Returns
+  -------
+  np.ndarray((sample_size,3)): sample coordinates
   """
+  global logger
+  
+  if distribution is not None:
+      distribution_z = distribution
+
+  assert callable(distribution_x), "distribution_x must be callable"
+  assert callable(distribution_y), "distribution_y must be callable"
+  assert callable(distribution_z), "distribution_z must be callable"
+
+  assert np.array(box).shape == (3,), "wrong specification of 3d box dimensions"
+  if isinstance(n_gridpoints,int):
+      n_gridpoints = 3*[n_gridpoints] # to list
+
+  n_gridpoints = np.array(n_gridpoints,dtype=int)
+
+  assert n_gridpoints.shape == (3,), "n_gridpoints must be int or list of int"
+
   atom_positions = []
 
   # We define which positions in space the atoms can be placed
   support = {}
   # Using the box parameter, we construct a grid inside the box
   # This results in a 100x100x100 grid:
-  support['x'] = np.linspace(0, box[0], n_gridpoints)
-  support['y'] = np.linspace(0, box[1], n_gridpoints)
-  support['z'] = np.linspace(0, box[2], n_gridpoints)
+  support['x'] = np.linspace(0, box[0], n_gridpoints[0])
+  support['y'] = np.linspace(0, box[1], n_gridpoints[1])
+  support['z'] = np.linspace(0, box[2], n_gridpoints[2])
+
+  # Normalize distributions:
+  Zx = np.sum(distribution_x(support['x']))
+  Zy = np.sum(distribution_y(support['y']))
+  Zz = np.sum(distribution_z(support['z']))
+  normalized_distribution_x = lambda x: distribution_x(x) / Zx
+  normalized_distribution_y = lambda x: distribution_y(x) / Zy
+  normalized_distribution_z = lambda x: distribution_z(x) / Zz
 
   # For every atom, draw random x, y and z coordinates
   for i in range(atom_count):
-    # Z coordinate is distributed non-uniformely
-    z = rejection_sampler(distribution, support['z'])
+      x = rejection_sampler(normalized_distribution_x, support['x'])
+      y = rejection_sampler(normalized_distribution_y, support['y'])
+      z = rejection_sampler(normalized_distribution_z, support['z'])
 
-    # x and y are uniformely distributed
-    x = rejection_sampler(uniform, support['x'])
-    y = rejection_sampler(uniform, support['y'])
+      atom_positions += [[x, y, z]]
 
-    atom_positions += [[x, y, z]]
   atom_positions = np.array(atom_positions)
 
   return atom_positions
@@ -233,7 +284,8 @@ def export_xyz( struc, atom_name='Na', box=[50.0,50.0,100.0],
 def export_named_struc(struc):
   """Export atom structure to .xyz file format.
 
-  Arguments
+  Parameters
+  ----------
   named_struc: list of atom names and positions, with lines like e.g. Na 1.2 5.1 4.2
   """
 

@@ -612,7 +612,7 @@ class PoissonNernstPlanckSystem:
       self.relative_permittivity*self.vacuum_permittivity*self.R*self.T/(
         2.0*self.F**2*self.I() ) )
 
-  # default 0.1 mM NaCl aqueous solution
+  # default 0.1 mM (i.e. mol/m^3) NaCl aqueous solution
   def __init__(self,
     c = np.array([0.1,0.1]),
     z = np.array([1,-1]),
@@ -728,3 +728,132 @@ class PoissonNernstPlanckSystem:
         c_scaled, lwidth=self.label_width))
     self.logger.info('{:<{lwidth}s} {:> 8.4g}'.format(
       'reduced potential delta_u*', self.delta_u_scaled, lwidth=self.label_width))
+
+def main():
+  """Solve Poisson-Nernst-Planck system and store distribution"""
+  import argparse
+
+  # in order to have both:
+  # * preformatted help text and ...
+  # * automatic display of defaults
+  class ArgumentDefaultsAndRawDescriptionHelpFormatter(
+    argparse.ArgumentDefaultsHelpFormatter,
+    argparse.RawDescriptionHelpFormatter):
+    pass
+
+  parser = argparse.ArgumentParser(description=__doc__,
+    formatter_class = ArgumentDefaultsAndRawDescriptionHelpFormatter)
+
+  parser.add_argument('outfile', metavar='OUT',
+                      help='numpy .npz format output file')
+
+  parser.add_argument('--box','-b', default=[50.0,50.0,100.0], nargs=3,
+                      metavar=('X','Y','Z'), required=False, type=float,
+                      dest="box", help='Box dimensions')
+
+  parser.add_argument('--concentrations','-c',
+                      default=[0.1,0.1], type=float, nargs='+',
+                      metavar='c', required=False, dest="concentration",
+                      help='Ion species concentrations c (mol m^-3, mM)')
+
+  parser.add_argument('--charges','-z',
+                      default=[1,-1], type=float, nargs='+',
+                      metavar='z', required=False, dest="charges",
+                      help='Ion species number charges z')
+
+  parser.add_argument('--potential','-u',
+                      default=0.05, type=float, nargs=1,
+                      metavar='U', required=False, dest="potential",
+                      help='Potential drop from left to right dU (V)')
+  parser.add_argument('--length','-l',
+                      default=100e-9, type=float, nargs=1,
+                      metavar='L', required=False, dest="length",
+                      help='Domain length (m)')
+  #T = 298.15,
+  #relative_permittivity = 79,
+
+  parser.add_argument('--debug', default=False, required=False,
+                      action='store_true', dest="debug", help='debug flag')
+  parser.add_argument('--verbose', default=False, required=False,
+                      action='store_true', dest="verbose", help='verbose flag')
+
+  try:
+    import argcomplete
+    argcomplete.autocomplete(parser)
+    # This supports bash autocompletion. To enable this, pip install
+    # argcomplete, activate global completion, or add
+    #      eval "$(register-python-argcomplete lpad)"
+  # into your .bash_profile or .bashrc
+  except ImportError:
+    pass
+
+  args = parser.parse_args()
+
+  if args.debug:
+    loglevel = logging.DEBUG
+  elif args.verbose:
+    loglevel = logging.INFO
+  else:
+    loglevel = logging.WARNING
+
+  print('This is `{}` : `{}`.'.format(__file__,__name__))
+
+  # input verification
+  if args.hist_plot_file_name:
+    if len(args.hist_plot_file_name) == 1:
+      hist_plot_file_name_prefix, hist_plot_file_name_ext = os.path.splitext(
+        args.hist_plot_file_name[0])
+      hist_plot_file_name = [
+        hist_plot_file_name_prefix + '_' + suffix + hist_plot_file_name_ext
+        for suffix in ('x','y','z') ]
+    elif len(args.hist_plot_file_name) == 3:
+      hist_plot_file_name = args.hist_plot_file_name
+    else:
+      raise ValueError(
+        """If specifying histogram plot file names, please give either one
+        file name to be suffixed with '_x','_y','_z' or three specific file
+        names.""")
+  else:
+   hist_plot_file_name = None
+
+  box = np.array(args.box)
+
+  # get Python function from function name string:
+  # (from https://github.com/materialsproject/fireworks/blob/master/fireworks/user_objects/firetasks/script_task.py)
+  toks = args.distribution.rsplit('.', 1)
+  if len(toks) == 2:
+    modname, funcname = toks
+    mod = __import__(modname, globals(), locals(), [str(funcname)], 0)
+    func = getattr(mod, funcname)
+  else:
+    # Handle built in functions.
+    func = getattr(builtins, toks[0])
+
+  print('Generating structure from distribution ...')
+  struc = generate_structure(distribution=func, box=box)
+
+  print('Exporting ...')
+  export_xyz( struc, outfile_name=args.outfile,
+              box=box, atom_name=args.atom_name)
+
+  # only if requested
+  if hist_plot_file_name:
+    print('Plotting distribution histograms ...')
+    histx, histy, histz = get_histogram(struc, box=box, n_bins=args.nbins)
+
+    plot_dist(histx, hist_plot_file_name[0], reference_distribution=uniform)
+    plot_dist(histy, hist_plot_file_name[1], reference_distribution=uniform)
+    plot_dist(histz, hist_plot_file_name[2], reference_distribution=func)
+
+  print('Done.')
+
+def test():
+  """Run docstring unittests"""
+  import doctest
+  doctest.testmod()
+
+if __name__ == '__main__':
+  # Run doctests1
+  test()
+  # Execute everything else
+  main()
