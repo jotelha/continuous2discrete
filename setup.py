@@ -35,6 +35,7 @@ if __name__ == "__main__":
         entry_points={
             'console_scripts': [
                 'c2d = continuous2discrete.continuous2discrete:main',
+                'pnp = continuous2discrete.poisson_nernst_planck_distribution:main'
             ],
         }
     )
