@@ -1,19 +1,10 @@
-# Generate atomic distribution
-Generate an MD input file containing a number of atoms in solution, which approximate a given distribution in space.
+# Introduction
+Samples discrete coordinate sets from arbitrary continuous distributions
 
-### Background
-In order to understand lubrication better, we simulate thin layers of lubricant on a metallic surface, solvated in water.
-Different structures of lubricant films are created by varying parameters like their concentration and the charge of the surface.
-The lubricant is somewhat solvable in water, thus parts of the film will diffuse into the bulk water.
+## Background
+In order to investigate the electrochemical double layer at interfaces, this tool samples discrete coordinate sets from classical continuum solutions to Poisson-Nernst-Planck systems. This reduces to the Poisson-Boltzmann distribution as an analyitc solution for the special case of a binary electrolyte half space. Coordinate sets are stored as .xyz or LAMMPS data files.
 
 ![pic](https://i.ibb.co/Yh8DxVM/showpicture.png)
-
-### Physical solution
-Lubricant molecules are charged, and their distribution is described by the Poisson-Boltzmann equation.
-
-### Simulating the structure
-To incorporate these results into our lubricant simulation, we need to sample the correct distribution.
-Then we need to transform these samples into the correct file formats and feed them into a Molecular Dynamics simulation.
 
 ### Content
 * `showcase_poisson_boltzmann.ipynb`: A working example
@@ -26,9 +17,10 @@ When installed with pip, i.e.
 
     pip install -e .
 
-from within this directory, `c2d` (continuous2discrete) offers a simple
-command line interface to sample discrete coordinate sets from continuous
-distributions. Type `c2d --help` for usage information.
+from within this directory, `pnp` (Poisson-Nernst-Planck) and `c2d` (continuous2discrete) 
+offer simple command line interfaces to solve arbitrary (1D) Poisson-Nernst-Planck systems 
+and to sample discrete coordinate sets from continuous distributions. Type `pnp --help` and
+`c2d --help` for usage information.
 
 A simple sample usage to generate a discrete coordinate set from
 the continuous solution of Poisson-Nernst-Planck equations for
