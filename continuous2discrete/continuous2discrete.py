@@ -5,19 +5,21 @@ Copyright 2019 IMTEK Simulation
 University of Freiburg
 
 Authors:
-  Lukas Elflein <elfleinl@cs.uni-freiburg.de>
+
   Johannes Hoermann <johannes.hoermann@imtek-uni-freiburg.de>
+  Lukas Elflein <elfleinl@cs.uni-freiburg.de>
 """
 import logging, os, sys
 import os.path
 from six.moves import builtins
+from collections.abc import Iterable
 
 import numpy as np
 import matplotlib.pyplot as plt
 
 import ase, ase.io
 import scipy.constants as sc
-from scipy import interpolate
+from scipy import interpolate, integrate, optimize
 
 
 logger = logging.getLogger(__name__)
@@ -29,7 +31,7 @@ def exponential(x, rate=0.1):
 
 def uniform(x, *args, **kwargs):
     """Uniform distribution."""
-    return np.ones(x.shape) / 2
+    return np.ones(np.array(x).shape) / 2
 
 
 def test():
@@ -149,7 +151,7 @@ def inversion_sampler(distribution, support):
     return sample
 
 
-def rejection_sampler(distribution, support, max_tries=10000):
+def rejection_sampler(distribution, support=(0.0,1.0), max_tries=10000):
     """Sample distribution by drawing from support and keeping according to distribution.
 
     Draw a random sample from our support, and keep it if another random number is
@@ -157,8 +159,11 @@ def rejection_sampler(distribution, support, max_tries=10000):
 
     Parameters
     ----------
-    distribution: The target distribution, as a histogram over the support
-    support: locations in space where our distribution is defined
+    distribution: callable(x)
+        target distribution
+    support: list or 2-tuple
+        either discrete list of locations in space where our distribution is
+        defined, or 2-tuple defining conitnuous support interval
     max_tries: how often the sampler should attempt to draw before giving up.
        If the distribution is very sparse, increase this parameter to still get results.
 
@@ -183,33 +188,59 @@ def rejection_sampler(distribution, support, max_tries=10000):
     # values from [0,1)]
     logger.debug("Rejection sampler on distribution f(x) ({}) with".format(
         distribution))
-    logger.debug("discrete support X ({:d} points in interval [{},{}]".format(
-        len(support), np.min(support), np.max(support)))
-    # uniform probability density g(x) on support is
-    g = 1.0 / len(support) # for discrete support
-    # maximum probability on distributiom f(x) is
-    fmax = np.max(distribution(support))
-    # thus M must be at least
-    M = fmax / g
-    logger.debug("Uniform probability g(x) = {:g} and".format(g))
-    logger.debug("maximum probability max(f(x)) = {:g} require".format(fmax))
-    logger.debug("M >= g(x)/max(f(x)), i.e. M = {:g}.".format(M))
 
-    for i in range(max_tries):
-        # draw a sample from support
-        sample = np.random.choice(support)
+    # coninuous support case
+    if isinstance(support,tuple) and len(support) == 2:
+        a = support[0]
+        b = support[1]
+        logger.debug("continuous support X (interval [{},{}]".format(a,b))
 
-        # Generate random float in the half-open interval [0.0, 1.0) and .
-        # keep sample with probablity of distribution
-        if np.random.random() < distribution(sample) / (M*g):
-            return sample
+        g = 1 / ( a - b )
+        x0 = optimize.minimize_scalar(
+            distribution, bounds=(a,b), method='bounded').x
+        fmax = distribution(x0)
+        M = fmax / g
+        logger.debug("Uniform probability density g(x) = {:g} and".format(g))
+        logger.debug("maximum probability density f(x0) = {:g} at x0 = {:g}".format(fmax, x0))
+        logger.debug("require M >= g(x)/max(f(x)), i.e. M = {:g}.".format(M))
+
+        for i in range(max_tries):
+            # draw a sample from a uniformly distributed support
+            sample = np.random.random() * (b-a) + a
+
+            # Generate random float in the half-open interval [0.0, 1.0) and .
+            # keep sample with probablity of distribution
+            if np.random.random() < distribution(sample) / (M*g):
+                return sample
+
+    else: # discrete support case
+        logger.debug("discrete support X ({:d} points in interval [{},{}]".format(
+            len(support), np.min(support), np.max(support)))
+        # uniform probability density g(x) on support is
+        g = 1.0 / len(support) # for discrete support
+        # maximum probability on distributiom f(x) is
+        fmax = np.max(distribution(support))
+        # thus M must be at least
+        M = fmax / g
+        logger.debug("Uniform probability g(x) = {:g} and".format(g))
+        logger.debug("maximum probability max(f(x)) = {:g} require".format(fmax))
+        logger.debug("M >= g(x)/max(f(x)), i.e. M = {:g}.".format(M))
+
+        for i in range(max_tries):
+            # draw a sample from support
+            sample = np.random.choice(support)
+
+            # Generate random float in the half-open interval [0.0, 1.0) and .
+            # keep sample with probablity of distribution
+            if np.random.random() < distribution(sample) / (M*g):
+                return sample
 
     raise RuntimeError('Maximum of attempts max_tries {} exceeded!'.format(max_tries))
 
+
 def generate_structure(
-    distribution=None, box=np.array([50, 50, 100]),
-    atom_count=100, n_gridpoints=100,
-    distribution_x=uniform, distribution_y=uniform, distribution_z=uniform):
+    distribution, box=np.array([50, 50, 100]),
+    count=100, n_gridpoints=np.nan):
     """Generate an atomic structure.
 
     Coordinates are distributed according to given distributions.
@@ -221,22 +252,18 @@ def generate_structure(
 
     Parameters
     ----------
-    distribution_x: func(x), optional
-      distribution for sampling in x direction (default: uniform)
-    distribution_y: func(x), optional (default: uniform)
-    distribution_z: func(x), optional (default: uniform)
-    distribution: func(x), optional (default: None)
-      If none of the above is explicitly specified, but 'distribution' is, then
-      uniform sampling appplies along x and y axes, while applying
-      'distribution' along z axis.
+    distribution: func(x) or list of func(x)
+      With one function, uniform sampling appplies along x and y axes,
+      while applying 'distribution' along z axis. With a list of functions,
+      apllies the respective distribution function along x, y and z direction.
     box: np.ndarray(3), optional (default: np.array([50, 50, 100]) )
       dimensions of volume to be filled with samples
-
-    atom_count: int, optional (default: 100)
+    count: int, optional (default: 100)
       number of samples to draw
-    n_gridpoints: int or (int,int,int), optional (default: 100)
-      samples are not placed arbitrarily, but on a evenly spaced grid of this
-      many grid points along each axis. Specify
+    n_gridpoints: int or (int,int,int), optional (default: np.nan)
+      If spcefified, samples are not placed arbitrarily, but on an evenly spaced
+      grid of this many grid points along each axis. Specify np.nan for
+      continuous sampling, i.e. (10,np.nan,20)
 
     Returns
     -------
@@ -244,61 +271,52 @@ def generate_structure(
     """
     global logger
 
-    if distribution is not None:
-        logger.info("Using 'distribution' {} as 'distribution_z'".format(
+    if callable(distribution):
+        logger.info("Using uniform distribution along x and y direction.")
+        logger.info("Using distribution {} along z direction.".format(
             distribution))
-        distribution_z = distribution
+        distribution = [ uniform, uniform, distribution]
 
-    assert callable(distribution_x), "distribution_x must be callable"
-    assert callable(distribution_y), "distribution_y must be callable"
-    assert callable(distribution_z), "distribution_z must be callable"
+    for d in distribution:
+        assert callable(d), "distribution {} must be callable".format(d)
 
     assert np.array(box).shape == (3,), "wrong specification of 3d box dimensions"
-    if isinstance(n_gridpoints,int):
+
+    #if isinstance(n_gridpoints,int) or n_gridpoints == np.nan:
+    if not isinstance(n_gridpoints, Iterable):
         n_gridpoints = 3*[n_gridpoints] # to list
 
-    n_gridpoints = np.array(n_gridpoints,dtype=int)
-
+    n_gridpoints = np.array(n_gridpoints,dtype=float)
     logger.info("Using {} grid as sampling support.".format(
         n_gridpoints))
 
     assert n_gridpoints.shape == (3,), "n_gridpoints must be int or list of int"
 
     # We define which positions in space the atoms can be placed
-    support = {}
-    # Using the box parameter, we construct a grid inside the box
-    # This results in a 100x100x100 grid:
-    support_x = np.linspace(0, box[0], n_gridpoints[0])
-    support_y = np.linspace(0, box[1], n_gridpoints[1])
-    support_z = np.linspace(0, box[2], n_gridpoints[2])
+    support = []
+    normalized_distribution = []
+    for k, d in enumerate(distribution):
+        # Using the box parameter, we construct a grid inside the box
+        # This results in a 100x100x100 grid:
+        if np.isnan( n_gridpoints[k] ): # continuous support
+            support.append((0,box[k])) # interval
+            # Normalization constant:
+            Z, _ = integrate.quad(d, support[-1][0], support[-1][1])
+        else : # discrete supoport
+            support.append(np.linspace(0, box[k], n_gridpoints[k]))
+            Z = np.sum(d(support[-1])) # Normalization constant
 
-    # Normalize distributions:
-    Zx = np.sum(distribution_x(support_x))
-    Zy = np.sum(distribution_y(support_y))
-    Zz = np.sum(distribution_z(support_z))
-    normalized_distribution_x = lambda x: distribution_x(x) / Zx
-    normalized_distribution_y = lambda x: distribution_y(x) / Zy
-    normalized_distribution_z = lambda x: distribution_z(x) / Zz
+        logger.info("Normalizing 'distribution' {} by {}.".format(d,Z))
+        normalized_distribution.append(
+            lambda x,k=k,Z=Z: distribution[k](x) / Z )
 
-    logger.info("Normalizing 'distribution_x' {} by {}.".format(
-        distribution_x,Zx))
-    logger.info("Normalizing 'distribution_y' {} by {}.".format(
-        distribution_y,Zy))
-    logger.info("Normalizing 'distribution_z' {} by {}.".format(
-        distribution_z,Zz))
-
-    atom_positions = []
     # For every atom, draw random x, y and z coordinates
-    for i in range(atom_count):
-        x = rejection_sampler(normalized_distribution_x, support_x)
-        y = rejection_sampler(normalized_distribution_y, support_y)
-        z = rejection_sampler(normalized_distribution_z, support_z)
-        atom_positions += [[x, y, z]]
+    positions = np.array( [ [
+        rejection_sampler(d,s) for d,s in zip(normalized_distribution,support) ]
+            for i in range(int(count)) ])
 
-    atom_positions = np.array(atom_positions)
-    logger.info("Drew {} samples from distributions.".format(
-        atom_positions.shape))
-    return atom_positions
+    logger.info("Drew {} samples from distributions.".format(positions.shape))
+    return positions
 
 
 def export_xyz( struc, atom_name='Na', box=[50.0,50.0,100.0],
@@ -362,7 +380,9 @@ def concat_names_structs(struc_list, name_list):
     return np.array(concated_list)
 
 def main():
-    """Generate and export an atomic structure, and plot its distribution"""
+    """Generate discrete coordinate sets from continuous distributions.
+    Export as atom positions in .xyz of LAMMPS data file format.
+    Plot continuous and discrete distributions if wanted."""
     import argparse
 
     # in order to have both:
@@ -373,6 +393,11 @@ def main():
         argparse.RawDescriptionHelpFormatter):
         pass
 
+    class StoreAsNumpyArray(argparse._StoreAction):
+        def __call__(self, parser, namespace, values, option_string=None):
+            values = np.array(values,ndmin=1)
+            return super().__call__(parser, namespace, values, option_string)
+
     parser = argparse.ArgumentParser(description=__doc__,
         formatter_class = ArgumentDefaultsAndRawDescriptionHelpFormatter)
 
@@ -382,6 +407,7 @@ def main():
                         help='.xyz format output file')
 
     parser.add_argument('--box','-b', default=[50.0e-9,50.0e-9,100.0e-9], nargs=3,
+                        action=StoreAsNumpyArray,
                         metavar=('X','Y','Z'), required=False, type=float,
                         dest="box", help='Box dimensions')
 
@@ -395,16 +421,30 @@ def main():
                         help='Atom names')
 
     parser.add_argument('--charges', default=[1,-1], type=float, nargs='+',
+                        action=StoreAsNumpyArray,
                         metavar=('NAME'), required=False, dest="charges",
                         help='Atom charges')
 
     # sampling
-    parser.add_argument('--ngridpoints', default=1000, type=int, nargs='+',
-                        metavar=('N'), required=False, dest="ngridpoints",
-                        help='Number of grid points for discrete support')
-    parser.add_argument('--sample-size', default=1000, type=int, nargs='+',
+    parser.add_argument('--ngridpoints', default=np.nan, type=float, nargs='+',
+                        action=StoreAsNumpyArray,
+                        metavar=('N'), required=False, dest="n_gridpoints",
+                        help=('Number of grid points for discrete support. '
+                              'Continuous support for all sampes per default. '
+                              'Specify "NaN" explicitly for continuous support '
+                              'in particular species, i.e. '
+                              '"--n_gridpoints 100 NaN 50"'))
+    parser.add_argument('--sample-size', default=np.nan, type=float, nargs='+',
+                        action=StoreAsNumpyArray,
                         metavar=('N'), required=False, dest="sample_size",
-                        help='Sample size')
+                        help=('Sample size. Specify '
+                            'multiple values for specific number of atom '
+                            'positions for each species. Per default, infer '
+                            'sample size from distributions, assuming '
+                            'concentrations in SI units (i.e. mM or mol / m^3).'
+                            'Specify "NaN" explicitly for inference in certain '
+                            'species only, i.e. '
+                            '"--sample-size 100 NaN 50"' ))
 
     # output
     parser.add_argument('--nbins', default=100, type=int,
@@ -492,7 +532,12 @@ def main():
     else:
         hist_plot_file_name = None
 
-    box = np.array(args.box)
+    if not isinstance(args.box, np.ndarray):
+        args.box = np.array(args.box,ndmin=1)
+    if not isinstance(args.sample_size, np.ndarray):
+        args.sample_size = np.array(args.sample_size,ndmin=1)
+    if not isinstance(args.n_gridpoints, np.ndarray):
+        args.n_gridpoints = np.array(args.n_gridpoints,ndmin=1)
 
     # get Python function from function name string:
     # (from https://github.com/materialsproject/fireworks/blob/master/fireworks/user_objects/firetasks/script_task.py)
@@ -537,29 +582,50 @@ def main():
     # sample_size = int(np.round(box.prod()*pnp.c[0] * sc.Avogadro))
     # [V] = m^3, [c] = mol / m^3, [N_A] = 1 / mol
 
-    sample_size = args.sample_size if isinstance(args.sample_size,list) else [args.sample_size]
-    ngridpoints = args.ngridpoints if isinstance(args.ngridpoints,list) else [args.ngridpoints]
-    sample_size = sample_size*len(C) if len(sample_size) == 1 else sample_size
-    ngridpoints = ngridpoints*len(C) if len(ngridpoints) == 1 else ngridpoints
+    # sample_size = args.sample_size if isinstance(args.sample_size,list) else [args.sample_size]
+    #n_gridpoints = args.n_gridpoints if isinstance(args.n_gridpoints,) else [args.n_gridpoints]
+    sample_size = args.sample_size
+    sample_size = sample_size.repeat(len(C)) if sample_size.shape == (1,) else sample_size
+    print(sample_size.shape)
+    # distribution functions from concentrations
+    D = [ interpolate.interp1d(x,c) for c in C ]
+    for i, s in enumerate(sample_size):
+        if np.isnan(s):
+            # average concentration in distribution over interval
+            cave, _ = integrate.quad( D[i], 0, args.box[-1] ) / args.box[-1] # z direction
+            # [V] = m^3, [c] = mol / m^3, [N_A] = 1 / mol
+            sample_size[i] = int(
+                np.round(
+                    args.box.prod()*cave * sc.Avogadro) )
+            logger.info('Inferred {} samples on interval [{},{}] m'.format(
+                sample_size[i],0,args.box[-1]))
+            logger.info('for average concentration {} mM.'.format(cave))
+
+    n_gridpoints = args.n_gridpoints # assume n_gridpoints is np.ndarray
+    n_gridpoints = n_gridpoints.repeat(len(C)) if n_gridpoints.shape == (1,) else n_gridpoints
+
+    logger.info('Generating {} positions on {} support for species {}.'.format(
+        sample_size, n_gridpoints, args.names))
 
     logger.info('Generating structure from distribution ...')
     struc = [ generate_structure(
-                distribution=interpolate.interp1d(x,c),
-                box=box, atom_count=s)
-                for c,s in zip(C,sample_size) ]
+                distribution=d,
+                box=args.box, count=sample_size[k],
+                n_gridpoints=n_gridpoints[k] )
+                    for k,d in enumerate(D) ]
 
     logger.info('Generated {:d} coordinate sets.'.format(len(struc)))
 
     logger.info('Creating ase.Atom objects ...')
     system = ase.Atoms(
-        cell=box/sc.angstrom,
+        cell=args.box/sc.angstrom,
         pbc=[1,1,0])
 
     for i, s in enumerate(struc):
         logger.info('{:d} samples in coordinate set {:d}.'.format(len(s),i))
         system += ase.Atoms(
-            symbols=args.names[i]*sample_size[i],
-            charges=[args.charges[i]]*sample_size[i],
+            symbols=args.names[i]*int(sample_size[i]),
+            charges=[args.charges[i]]*int(sample_size[i]),
             positions=s/sc.angstrom)
 
     logger.info('Writing output file ...')
@@ -593,7 +659,7 @@ def main():
     # only if requested
     if hist_plot_file_name:
         print('Plotting distribution histograms ...')
-        histx, histy, histz = get_histogram(struc, box=box, n_bins=args.nbins)
+        histx, histy, histz = get_histogram(struc, box=args.box, n_bins=args.nbins)
 
         plot_dist(histx, hist_plot_file_name[0], reference_distribution=uniform)
         plot_dist(histy, hist_plot_file_name[1], reference_distribution=uniform)

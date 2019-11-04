@@ -27,11 +27,13 @@ if __name__ == "__main__":
         python_requires='>3.6.3',
         zip_safe=False,
         install_requires=[
+            'ase>=3.19.0b1',
+            'matplotlib>=3.0.3',
             'numpy >= 1.16.2',
-            'scipy>=1.2.1',
-            'six>=1.12.0',
             'pandas>=0.24.2',
-            'matplotlib>=3.0.3'],
+            'pytest>=5.2.2',
+            'scipy>=1.2.1',
+            'six>=1.12.0'],
         entry_points={
             'console_scripts': [
                 'c2d = continuous2discrete.continuous2discrete:main',

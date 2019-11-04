@@ -30,23 +30,23 @@ from within this directory, `c2d` (continuous2discrete) offers a simple
 command line interface to sample discrete coordinate sets from continuous
 distributions. Type `c2d --help` for usage information.
 
-A simple sample usage to generate a discrete coordinate set from 
+A simple sample usage to generate a discrete coordinate set from
 the continuous solution of Poisson-Nernst-Planck equations for
-xxx NaCl would look like this
+0.1 mM NaCl aqueous solution across a 0.05 V potential drop would look like this
 
-    pnp -c 0.1 0.1 -u 0.05 -l 1.0e-7 -bc cell --convergence --log --verbose NaCl.txt
-    c2d --ngridpoints 10000 --sample-size 1000 --verbose NaCl.txt NaCl.lammps
+    pnp -c 0.1 0.1 -u 0.05 -l 1.0e-7 -bc cell --verbose NaCl.txt
+    c2d --verbose NaCl.txt NaCl.lammps
 
-for PNP solution in plain text file and according coordinate samples LAMMPS 
+for PNP solution in plain text file and according coordinate samples LAMMPS
 data file, or like this
 
-    pnp -c 0.1 0.1 -u 0.05 -l 1.0e-7 -bc cell --convergence --log --verbose NaCl.npz
-    c2d --ngridpoints 10000 --sample-size 1000 --verbose NaCl.npz NaCl.xyz
+    pnp -c 0.1 0.1 -u 0.05 -l 1.0e-7 -bc cell --verbose NaCl.npz
+    c2d --verbose NaCl.npz NaCl.xyz
 
 for PNP solution in binary numpy .npz file and coordinate samples in generic
 xyz file, or as a pipeline
 
-    pnp -c 0.1 0.1 -u 0.05 -l 1.0e-7 -bc cell | c2d --ngridpoints 10000 --sample-size 1000 > NaCl.xyz
+    pnp -c 0.1 0.1 -u 0.05 -l 1.0e-7 -bc cell --verbose | c2d --verbose > NaCl.xyz
 
 for text and xyz format streams.
 
@@ -62,4 +62,3 @@ ipython kernel install --user --name=new_kernel
 jupyter notebook showcase_poisson_bolzman_distribution.ipynb
 ```
 and then choose `new_kernel` in the top right dropdown menu as a kernel.
-
