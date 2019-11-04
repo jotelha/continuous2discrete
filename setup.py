@@ -32,6 +32,7 @@ if __name__ == "__main__":
             'numpy >= 1.16.2',
             'pandas>=0.24.2',
             'pytest>=5.2.2',
+            'pytest-datadir>=1.3.1',
             'scipy>=1.2.1',
             'six>=1.12.0'],
         entry_points={
