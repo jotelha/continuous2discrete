@@ -586,7 +586,7 @@ def main():
     #n_gridpoints = args.n_gridpoints if isinstance(args.n_gridpoints,) else [args.n_gridpoints]
     sample_size = args.sample_size
     sample_size = sample_size.repeat(len(C)) if sample_size.shape == (1,) else sample_size
-    print(sample_size.shape)
+
     # distribution functions from concentrations
     D = [ interpolate.interp1d(x,c) for c in C ]
     for i, s in enumerate(sample_size):
@@ -658,7 +658,7 @@ def main():
 
     # only if requested
     if hist_plot_file_name:
-        print('Plotting distribution histograms ...')
+        logger.info('Plotting distribution histograms ...')
         histx, histy, histz = get_histogram(struc, box=args.box, n_bins=args.nbins)
 
         plot_dist(histx, hist_plot_file_name[0], reference_distribution=uniform)
