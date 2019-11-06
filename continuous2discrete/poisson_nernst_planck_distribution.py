@@ -401,6 +401,34 @@ class PoissonNernstPlanckSystem:
             lambda x, k=k: self.leftControlledVolumeSchemeFluxBC(x,k),
             lambda x, k=k, N0=N0[k]: self.numberConservationConstraint(x,k,N0) ] )
 
+    def useRobinCellBC(self):
+        """Interfaces at left hand side and right hand side"""
+        self.boundary_conditions = []
+
+        # Potential Dirichlet BC
+        self.u0 = self.delta_u_scaled / 2.0
+        self.u1 = - self.delta_u_scaled / 2.
+        self.logger.info('{:>{lwidth}s} u0 + lambda_S*dudx = {:< 8.4g}'.format(
+          'Left hand side Robin boundary condition', self.u0, lwidth=self.label_width))
+        self.logger.info('{:>{lwidth}s} u1 + lambda_S*dudx = {:< 8.4g}'.format(
+          'Right hand side Robin boundary condition', self.u1, lwidth=self.label_width))
+        self.boundary_conditions.extend([
+          lambda x: self.leftPotentialRobinBC(x,self.lambda_S_scaled,self.u0),
+          lambda x: self.rightPotentialRobinBC(x,self.lambda_S_scaled,self.u1) ])
+
+        N0 = self.L_scaled*self.c_scaled # total amount of species in cell
+        for k in range(self.M):
+          self.logger.info('{:>{lwidth}s} j0 = {:<8.4g}'.format(
+            'Ion species {:02d} left hand side concentration Flux boundary condition'.format(k),
+            0.0, lwidth=self.label_width))
+          self.logger.info('{:>{lwidth}s} N0 = {:<8.4g}'.format(
+            'Ion species {:02d} number conservation constraint'.format(k),
+            N0[k], lwidth=self.label_width))
+
+          self.boundary_conditions.extend(  [
+            lambda x, k=k: self.leftControlledVolumeSchemeFluxBC(x,k),
+            lambda x, k=k, N0=N0[k]: self.numberConservationConstraint(x,k,N0) ] )
+
     # TODO: meaningful test for Dirichlet BC
     def useStandardDirichletBC(self):
         self.boundary_conditions = []
@@ -503,6 +531,22 @@ class PoissonNernstPlanckSystem:
     def rightDirichletBC(self,x,k,x0=0):
         nijk = x[(k+1)*self.Ni:(k+2)*self.Ni]
         return nijk[-1] - x0
+
+    def leftPotentialRobinBC(self,x,lam,u0=0):
+        return self.leftRobinBC(x,-1,lam,u0)
+
+    def leftRobinBC(self,x,k,lam,x0=0):
+        """Construct Robin (u + lam*dudx = u0 ) BC at left boundary"""
+        nijk = x[(k+1)*self.Ni:(k+2)*self.Ni]
+        return nijk[0] + lam * ( -3.0*nijk[0] + 4.0*nijk[1] - nijk[2] ) - x0
+
+    def rightPotentialRobinBC(self,x,lam,u0=0):
+        return self.rightRobinBC(x,-1,lam,u0)
+
+    def rightRobinBC(self,x,k,lam,x0=0):
+        """Construct Robin (u + lam*dudx = u0 ) BC at right boundary"""
+        nijk = x[(k+1)*self.Ni:(k+2)*self.Ni]
+        return nijk[-1] + lam * ( 3.0*nijk[-1] - 4.0*nijk[-2] + nijk[-3] ) - x0
 
     def numberConservationConstraint(self,x,k,N0):
         """N0: total amount of species, k: ion species"""
@@ -643,6 +687,7 @@ class PoissonNernstPlanckSystem:
         T = 298.15,
         delta_u = 0.05, # potential difference [V]
         relative_permittivity = 79,
+        lambda_S=0, # Stern layer (comoact layer) thickness
         vacuum_permittivity   = sc.epsilon_0,
         R = sc.value('molar gas constant'),
         F = sc.value('Faraday constant') ):
@@ -675,6 +720,7 @@ class PoissonNernstPlanckSystem:
         self.T  = T # temperature
         self.L  = L # 1d domain size
         self.delta_u = delta_u # potential difference
+        self.lambda_S = lambda_S # Stern layer thickness
 
         self.relative_permittivity = relative_permittivity
         self.vacuum_permittivity   = vacuum_permittivity
@@ -699,6 +745,8 @@ class PoissonNernstPlanckSystem:
           'potential difference delta_u', self.delta_u, lwidth=self.label_width))
         self.logger.info('{:<{lwidth}s} {:> 8.4g}'.format(
           'relative permittivity eps_R', self.relative_permittivity, lwidth=self.label_width))
+        self.logger.info('{:<{lwidth}s} {:> 8.4g}'.format(
+          'compact layer thickness lambda_S', self.lambda_S, lwidth=self.label_width))
         self.logger.info('{:<{lwidth}s} {:> 8.4g}'.format(
           'vacuum permittivity eps_0', self.vacuum_permittivity, lwidth=self.label_width))
         self.logger.info('{:<{lwidth}s} {:> 8.4g}'.format(
@@ -737,6 +785,9 @@ class PoissonNernstPlanckSystem:
         # potential difference
         self.delta_u_scaled = self.delta_u / self.u_unit
 
+        # compact layer
+        self.lambda_S_scaled = self.lambda_S / self.l_unit
+
         # relaxation time
         # self.tau_scaled   = self.tau / self.t_unit
 
@@ -751,6 +802,8 @@ class PoissonNernstPlanckSystem:
             c_scaled, lwidth=self.label_width))
         self.logger.info('{:<{lwidth}s} {:> 8.4g}'.format(
           'reduced potential delta_u*', self.delta_u_scaled, lwidth=self.label_width))
+        self.logger.info('{:<{lwidth}s} {:> 8.4g}'.format(
+           'reduced lambda_S*', self.lambda_S_scaled, lwidth=self.label_width))
 
 def main():
     """Solve Poisson-Nernst-Planck system and store distribution.
@@ -809,11 +862,17 @@ def main():
                         dest="relative_permittivity",
                         help='Relative permittivity')
 
+    parser.add_argument('--compact-layer','--stern-layer', '--lambda-s',
+                        default=0.0, type=float,
+                        metavar='L', required=False,
+                        dest="lambda_S",
+                        help='Stern or compact layer thickness (for Robin BC)')
+
     parser.add_argument('--boundary-conditions','-bc',
                         default='cell', type=str,
                         metavar='BC', required=False,
                         dest="boundary_conditions",
-                        choices=('cell','interface'),
+                        choices=('cell','cell-robin','interface'),
                         help='Boundary conditions')
 
     # technical settings
@@ -909,6 +968,7 @@ def main():
         L =         float(args.length),
         T =         float(args.temperature),
         delta_u =   float(args.potential),
+        lambda_S =  float(args.lambda_S),
         relative_permittivity = float(args.relative_permittivity) )
 
     # technical settings
@@ -920,6 +980,8 @@ def main():
 
     if args.boundary_conditions == 'cell':
         pnp.useStandardCellBC()
+    elif args.boundary_conditions == 'cell-robin':
+        pnp.useRobinCellBC()
     elif args.boundary_conditions == 'interface':
         pnp.useStandardInterfaceBC()
     else:
