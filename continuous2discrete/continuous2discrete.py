@@ -640,15 +640,8 @@ def main():
     logger.info('Output format {} to {}.'.format(outfile_format,outfile))
 
     if outfile_format == '.lammps':
-        # LAMMPS data format, units 'real', atom style 'full'
-        # weird behavior of ase output
-        if isinstance(outfile, str):
-            with open(outfile,'wb') as f:
-                ase.io.write(
-                    f,system,format='lammps-data',units="real",atom_style='full')
-        else:
-            ase.io.write(
-                outfile,system,format='lammps-data',units="real",atom_style='full')
+        ase.io.write(
+            outfile,system,format='lammps-data',units="real",atom_style='full')
     else: # elif outfile_format == '.xyz'
         ase.io.write(outfile,system,format='xyz')
 
